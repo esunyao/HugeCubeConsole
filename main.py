@@ -135,11 +135,14 @@ def on_get_devices_clicked():
 
 def on_sync_color_clicked():
     selected_device = get_selected_device()
-    if not selected_device:
+    if selected_device is None and not is_all_select_checked():
         return
     global mqtt_client, MODE
     if mqtt_client:
-        mqtt_client.publish("superCube/topic", f'{{"command":"config get","devices":"{selected_device}"}}')
+        payload = {"command": "config get"}
+        if selected_device:
+            payload["devices"] = selected_device
+        mqtt_client.publish("superCube/topic", json.dumps(payload))
         MODE = "config"
 
 
@@ -153,7 +156,7 @@ def update_color_viewer():
     color_viewer = MainWindow.findChild(CustomOpenGLWidget, "ColorViewer")
     if color_viewer and isinstance(color_viewer, CustomOpenGLWidget):
         color_viewer.setColor((r / 255.0, g / 255.0, b / 255.0, 1.0), brightness)
-    
+
     # 更新 R_COUNT、G_COUNT、B_COUNT 和 BR_COUNT 标签的文本
     r_count_label = MainWindow.findChild(QtWidgets.QLabel, "R_COUNT")
     g_count_label = MainWindow.findChild(QtWidgets.QLabel, "G_COUNT")
@@ -211,22 +214,24 @@ def on_sync_button_clicked():
             i["bright"] = brightness
             config = json.dumps(js)
             selected_device = get_selected_device()
-            if not selected_device:
+            if selected_device is None and not is_all_select_checked():
                 return
-            mqtt_client.publish("superCube/topic", json.dumps(
-                {"command": "config setFromJson", "config": js, "devices": selected_device}).replace("\\", ""))
+            payload = {"command": "config setFromJson", "config": js}
+            if selected_device:
+                payload["devices"] = selected_device
+            mqtt_client.publish("superCube/topic", json.dumps(payload).replace("\\", ""))
             MODE = "config"
             execute_config_mode()
-            # 同时执行一次 SYNC_COMMAND
             on_sync_command_button_clicked()
             return
+
     QtWidgets.QMessageBox.warning(MainWindow, "警告", "未找到匹配的pin口")
 
 def on_sync_command_button_clicked():
     if not check_mqtt_connection():
         return
     selected_device = get_selected_device()
-    if not selected_device:
+    if selected_device is None and not is_all_select_checked():
         return
     r = MainWindow.findChild(QtWidgets.QSlider, "R_Line").value()
     g = MainWindow.findChild(QtWidgets.QSlider, "G_Line").value()
@@ -236,9 +241,19 @@ def on_sync_command_button_clicked():
     if surface is None:
         QtWidgets.QMessageBox.warning(MainWindow, "警告", "请选择要设定的pin口")
         return
-    mqtt_client.publish("superCube/topic", json.dumps(
-        {"command": "Server_NeoPixel", "devices": selected_device, "r": r, "g": g, "b": b, "bright": brightness,
-         "num": ["0-24"], "save": False, "pin": int(surface.currentText())}))
+    payload = {
+        "command": "Server_NeoPixel",
+        "r": r,
+        "g": g,
+        "b": b,
+        "bright": brightness,
+        "num": ["0-24"],
+        "save": False,
+        "pin": int(surface.currentText())
+    }
+    if selected_device:
+        payload["devices"] = selected_device
+    mqtt_client.publish("superCube/topic", json.dumps(payload))
     MODE = "config"
     execute_config_mode()
 
@@ -246,12 +261,18 @@ def on_restart_button_clicked():
     if not check_mqtt_connection():
         return
     selected_device = get_selected_device()
-    if not selected_device:
+    if selected_device is None and not is_all_select_checked():
         return
-    mqtt_client.publish("superCube/topic", json.dumps({"command": "restart", "devices": selected_device}))
+    payload = {"command": "restart"}
+    if selected_device:
+        payload["devices"] = selected_device
+    mqtt_client.publish("superCube/topic", json.dumps(payload))
 
 
 def get_selected_device():
+    all_select_checkbox = MainWindow.findChild(QtWidgets.QCheckBox, "all_select")
+    if all_select_checkbox and all_select_checkbox.isChecked():
+        return None  # 如果 all_select 被选中，返回 None
     devices_box = MainWindow.findChild(QtWidgets.QComboBox, "DevicesBox")
     if devices_box is not None:
         selected_device = devices_box.currentText()
@@ -281,6 +302,17 @@ def on_mode_qiehuan_button_clicked():
         else:
             color_mode_label.setText("实时模式")
             real_time_mode = True
+
+def on_all_select_toggled(checked):
+    devices_box = MainWindow.findChild(QtWidgets.QComboBox, "DevicesBox")
+    if devices_box:
+        for i in range(devices_box.count()):
+            item = devices_box.model().item(i)
+            item.setCheckState(QtCore.Qt.Checked if checked else QtCore.Qt.Unchecked)
+
+def is_all_select_checked():
+    all_select_checkbox = MainWindow.findChild(QtWidgets.QCheckBox, "all_select")
+    return all_select_checkbox and all_select_checkbox.isChecked()
 
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
@@ -356,6 +388,11 @@ if __name__ == "__main__":
     mode_qiehuan_button = MainWindow.findChild(QtWidgets.QToolButton, "MODE_QIEHUAN")
     if mode_qiehuan_button:
         mode_qiehuan_button.clicked.connect(on_mode_qiehuan_button_clicked)
+
+    # 监听 all_select 复选框的切换事件
+    all_select_checkbox = MainWindow.findChild(QtWidgets.QCheckBox, "all_select")
+    if all_select_checkbox:
+        all_select_checkbox.toggled.connect(on_all_select_toggled)
 
     MainWindow.show()
 
